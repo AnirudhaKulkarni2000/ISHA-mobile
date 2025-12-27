@@ -2,7 +2,12 @@ import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
 import os from "os";
+import path from "path";
+import { fileURLToPath } from "url";
 import { connectDB } from "./configs/dbConfig.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Import routes
 import workoutRoutes from "./routes/workoutRoutes.js";
@@ -13,6 +18,7 @@ import stepsRoutes from "./routes/stepsRoutes.js";
 import bodyMeasurementsRoutes from "./routes/bodyMeasurementsRoutes.js";
 import shoppingListRoutes from "./routes/shoppingListRoutes.js";
 import wishlistRoutes from "./routes/wishlistRoutes.js";
+import progressRoutes from "./routes/progressRoutes.js";
 import aiRoutes from "./routes/aiRoutes.js";
 
 dotenv.config();
@@ -35,25 +41,26 @@ const getLocalIPs = () => {
 };
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' })); // Increased limit for base64 image uploads
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // Request logging middleware
 app.use((req, res, next) => {
   const timestamp = new Date().toISOString();
   console.log(`📥 [${timestamp}] ${req.method} ${req.url} - IP: ${req.ip}`);
-  
+
   // Log request body for POST/PUT requests (excluding sensitive data)
   if (['POST', 'PUT', 'PATCH'].includes(req.method) && req.body) {
     console.log(`   📦 Body:`, JSON.stringify(req.body).substring(0, 200));
   }
-  
+
   // Log response
   const originalSend = res.send;
-  res.send = function(data) {
+  res.send = function (data) {
     console.log(`📤 [${timestamp}] ${req.method} ${req.url} - Status: ${res.statusCode}`);
     return originalSend.apply(res, arguments);
   };
-  
+
   next();
 });
 
@@ -77,9 +84,17 @@ app.use("/api/steps", stepsRoutes);
 app.use("/api/measurements", bodyMeasurementsRoutes);
 app.use("/api/shopping-list", shoppingListRoutes);
 app.use("/api/wishlist", wishlistRoutes);
+app.use("/api/progress", progressRoutes);
 app.use("/api", aiRoutes);  // AI chat routes
 
-// Health check endpoint
+// Serve uploaded files statically
+app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
+
+// Health check endpoints (for Docker and monitoring)
+app.get("/health", (req, res) => {
+  res.status(200).json({ success: true, status: "healthy", timestamp: new Date().toISOString() });
+});
+
 app.get("/api/health", (req, res) => {
   res.status(200).json({ success: true, message: "Server is running" });
 });
@@ -92,7 +107,7 @@ const startServer = async () => {
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`\n🚀 Server is running on port ${PORT}`);
     console.log(`📍 Local: http://localhost:${PORT}`);
-    
+
     const ips = getLocalIPs();
     if (ips.length > 0) {
       console.log(`📱 Network access URLs:`);
