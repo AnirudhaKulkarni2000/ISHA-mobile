@@ -11,7 +11,7 @@ import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 // Set FFmpeg path
 ffmpeg.setFfmpegPath(ffmpegInstaller.path);
 
-const ollama = new Ollama({ host: 'http://localhost:11434' });
+const ollama = new Ollama({ host: process.env.OLLAMA_HOST || 'http://localhost:11434' });
 
 // Whisper pipeline (lazy loaded) - may not be available on ARM
 let whisperPipeline = null;
