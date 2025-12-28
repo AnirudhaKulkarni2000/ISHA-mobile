@@ -2,7 +2,6 @@ import { Ollama } from 'ollama';
 import { classifyIntent, INTENTS, ENTITIES } from '../services/intentClassifier.js';
 import { buildContext } from '../services/databaseContext.js';
 import { executeAction } from '../services/actionExecutor.js';
-import { pipeline } from '@xenova/transformers';
 import fs from 'fs';
 import path from 'path';
 import wavDecoder from 'wav-decoder';
@@ -14,14 +13,28 @@ ffmpeg.setFfmpegPath(ffmpegInstaller.path);
 
 const ollama = new Ollama({ host: 'http://localhost:11434' });
 
-// Whisper pipeline (lazy loaded)
+// Whisper pipeline (lazy loaded) - may not be available on ARM
 let whisperPipeline = null;
+let whisperAvailable = true;
 
 const getWhisperPipeline = async () => {
+  if (!whisperAvailable) {
+    throw new Error('Whisper not available on this architecture');
+  }
+
   if (!whisperPipeline) {
-    console.log('🔄 [Whisper] Loading speech recognition model... (first time may take a while)');
-    whisperPipeline = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny.en');
-    console.log('✅ [Whisper] Model loaded successfully!');
+    try {
+      console.log('🔄 [Whisper] Loading speech recognition model... (first time may take a while)');
+      // Dynamic import to avoid crash on ARM where onnxruntime-node is not available
+      const { pipeline } = await import('@xenova/transformers');
+      whisperPipeline = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny.en');
+      console.log('✅ [Whisper] Model loaded successfully!');
+    } catch (error) {
+      console.warn('⚠️ [Whisper] Speech recognition not available:', error.message);
+      console.warn('⚠️ [Whisper] This is expected on ARM architecture. Voice features will be disabled.');
+      whisperAvailable = false;
+      throw new Error('Speech recognition not available on this architecture');
+    }
   }
   return whisperPipeline;
 };
@@ -32,7 +45,7 @@ const getWhisperPipeline = async () => {
 const convertToWav = (inputPath) => {
   return new Promise((resolve, reject) => {
     const outputPath = inputPath.replace(/\.[^.]+$/, '_converted.wav');
-    
+
     ffmpeg(inputPath)
       .toFormat('wav')
       .audioFrequency(16000)
@@ -56,10 +69,10 @@ const convertToWav = (inputPath) => {
 const readWavFile = async (filePath) => {
   const buffer = fs.readFileSync(filePath);
   const audioData = await wavDecoder.decode(buffer);
-  
+
   // Get the first channel (mono)
   let samples = audioData.channelData[0];
-  
+
   // If stereo, average the channels
   if (audioData.channelData.length > 1) {
     const left = audioData.channelData[0];
@@ -69,7 +82,7 @@ const readWavFile = async (filePath) => {
       samples[i] = (left[i] + right[i]) / 2;
     }
   }
-  
+
   console.log(`📊 [Audio] Decoded: ${audioData.sampleRate}Hz, ${samples.length} samples`);
   return samples;
 };
@@ -192,7 +205,7 @@ Just talk to me naturally and I'll help you stay on track with your health goals
 const generateDirectConfirmation = (classification, actionResult) => {
   const { entity } = classification;
   const { action, message, data } = actionResult;
-  
+
   // Use the message from action result if available
   if (message) {
     const emoji = {
@@ -207,7 +220,7 @@ const generateDirectConfirmation = (classification, actionResult) => {
     };
     return `${emoji[entity] || '✅'} ${message}`;
   }
-  
+
   // Fallback confirmations
   switch (entity) {
     case 'shopping':
@@ -240,17 +253,17 @@ const generateResponse = async (userMessage, classification, context, actionResu
     if (actionResult?.success) {
       return generateDirectConfirmation(classification, actionResult);
     }
-    
+
     // For FAILED actions, return error message directly
     if (actionResult && !actionResult.success) {
       return `❌ ${actionResult.error || 'Something went wrong. Please try again.'}`;
     }
-    
+
     // For queries, use LLM or fallback
     // Build the context message for the LLM
     let contextMessage = `User's message: "${userMessage}"\n\n`;
     contextMessage += `Classified as: ${classification.intent} on ${classification.entity}\n\n`;
-    
+
     // Add relevant context data
     if (context && Object.keys(context).length > 0) {
       contextMessage += `Relevant data from database:\n${JSON.stringify(context, null, 2)}\n\n`;
@@ -274,7 +287,7 @@ const generateResponse = async (userMessage, classification, context, actionResu
 
   } catch (error) {
     console.error('❌ [AI] Response generation error:', error.message);
-    
+
     // Fallback response generation
     return generateFallbackResponse(classification, context, actionResult);
   }
@@ -309,12 +322,12 @@ const generateFallbackResponse = (classification, context, actionResult) => {
         }
         return `🏋️ No workouts scheduled for ${dayName}. Would you like to add some?`;
       }
-      
+
       // Today's meals
       if ((entity === ENTITIES.DIET || entity === ENTITIES.RECIPE) && context.mealsByType) {
         const { mealsByType, dayName, totalCalories } = context;
         let response = `🍽️ ${dayName}'s Meals:\n\n`;
-        
+
         const mealTypes = ['Breakfast', 'Lunch', 'Snack', 'Dinner'];
         mealTypes.forEach(type => {
           const meal = mealsByType[type];
@@ -324,11 +337,11 @@ const generateFallbackResponse = (classification, context, actionResult) => {
             response += `${type}: Not planned\n`;
           }
         });
-        
+
         response += `\n📊 Total: ${totalCalories} calories`;
         return response;
       }
-      
+
       // Today's analytics
       if (entity === ENTITIES.ANALYTICS || context.macros) {
         const { dayName, steps, caloriesPlanned, caloriesBurnt, macros } = context;
@@ -337,7 +350,7 @@ const generateFallbackResponse = (classification, context, actionResult) => {
         response += `🍽️ Calories Planned: ${caloriesPlanned || 0}\n`;
         response += `🔥 Calories Burnt: ${caloriesBurnt || 0}\n`;
         response += `📈 Net Calories: ${(caloriesPlanned || 0) - (caloriesBurnt || 0)}\n\n`;
-        
+
         if (macros) {
           response += `💪 Macros:\n`;
           response += `• Protein: ${macros.protein || 0}g\n`;
@@ -346,7 +359,7 @@ const generateFallbackResponse = (classification, context, actionResult) => {
         }
         return response;
       }
-      
+
       // Today's reminders
       if (entity === ENTITIES.REMINDER && context.reminders !== undefined) {
         const reminders = context.reminders;
@@ -357,7 +370,7 @@ const generateFallbackResponse = (classification, context, actionResult) => {
         return `⏰ No reminders for today. Would you like to set one?`;
       }
     }
-    
+
     // Regular (non-today) queries
     switch (entity) {
       case ENTITIES.STEPS:
@@ -365,7 +378,7 @@ const generateFallbackResponse = (classification, context, actionResult) => {
         const totalSteps = context?.summary?.total_steps || 0;
         const avgSteps = Math.round(context?.summary?.avg_steps || 0);
         return `📊 Steps Summary:\n• Today: ${todaySteps} steps\n• Total: ${totalSteps} steps\n• Average: ${avgSteps} steps/day\nKeep moving! 💪`;
-      
+
       case ENTITIES.WORKOUT:
         const workouts = context?.workouts || [];
         const totalWorkouts = context?.summary?.total_workouts || workouts.length;
@@ -374,7 +387,7 @@ const generateFallbackResponse = (classification, context, actionResult) => {
           return `🏋️ You have ${totalWorkouts} workouts logged!\n\nRecent workouts:\n${recentList}`;
         }
         return `🏋️ No workouts logged yet. Would you like to add one?`;
-      
+
       case ENTITIES.DIET:
         const meals = context?.meals || [];
         const totalCalories = context?.nutrition?.total_calories || 0;
@@ -383,7 +396,7 @@ const generateFallbackResponse = (classification, context, actionResult) => {
           return `🍽️ Diet Summary:\n• Total calories: ${Math.round(totalCalories)}\n\nRecent meals:\n${recentMeals}`;
         }
         return `🍽️ No meals logged yet. Tell me what you ate!`;
-      
+
       case ENTITIES.MEASUREMENT:
         const latest = context?.latest;
         if (latest) {
@@ -396,7 +409,7 @@ const generateFallbackResponse = (classification, context, actionResult) => {
           return msg;
         }
         return `📏 No measurements recorded yet. Would you like to log your weight?`;
-      
+
       case ENTITIES.REMINDER:
         const reminders = context?.reminders || [];
         if (reminders.length > 0) {
@@ -404,7 +417,7 @@ const generateFallbackResponse = (classification, context, actionResult) => {
           return `⏰ Your Reminders:\n${list}`;
         }
         return `⏰ No reminders set. Would you like to create one?`;
-      
+
       case ENTITIES.SHOPPING:
         const pending = context?.pending || [];
         if (pending.length > 0) {
@@ -412,7 +425,7 @@ const generateFallbackResponse = (classification, context, actionResult) => {
           return `🛒 Shopping List (${pending.length} items):\n${list}`;
         }
         return `🛒 Your shopping list is empty!`;
-      
+
       case ENTITIES.WISHLIST:
         const wishItems = context?.items || [];
         if (wishItems.length > 0) {
@@ -420,7 +433,7 @@ const generateFallbackResponse = (classification, context, actionResult) => {
           return `💝 Wishlist (${wishItems.length} items):\n${list}`;
         }
         return `💝 Your wishlist is empty!`;
-      
+
       case ENTITIES.ANALYTICS:
         // Analytics query (not today-specific)
         const analyticsOverview = context?.overview || {};
@@ -429,7 +442,7 @@ const generateFallbackResponse = (classification, context, actionResult) => {
         if (analyticsOverview.avgSteps) analyticsResponse += `• Avg Steps/Day: ${analyticsOverview.avgSteps}\n`;
         if (analyticsOverview.totalWorkouts) analyticsResponse += `• Total Workouts: ${analyticsOverview.totalWorkouts}\n`;
         return analyticsResponse;
-      
+
       case ENTITIES.GENERAL:
       default:
         // Comprehensive overview
@@ -442,7 +455,7 @@ const generateFallbackResponse = (classification, context, actionResult) => {
         if (latestM?.weight) response += `• Current Weight: ${latestM.weight} kg\n`;
         if (latestM?.height) response += `• Height: ${latestM.height} cm\n`;
         if (overview.bmi) response += `• BMI: ${overview.bmi}\n`;
-        
+
         if (response === `📊 Your Progress Summary:\n`) {
           return `👋 Hey! I'm ISHA, your fitness assistant. Ask me about your steps, workouts, weight, diet, or any fitness data!`;
         }
@@ -527,12 +540,12 @@ Examples:
     });
 
     const extracted = JSON.parse(response.message.content);
-    
+
     // If extraction returned empty or no useful values, use fallback
     if (!extracted || Object.keys(extracted).length === 0) {
       return fallbackExtraction(userMessage, classification);
     }
-    
+
     return extracted;
 
   } catch (error) {
@@ -548,9 +561,9 @@ Examples:
 const fallbackExtraction = (userMessage, classification) => {
   const message = userMessage.toLowerCase();
   const entity = classification.entity;
-  
+
   console.log('🔧 [AI] Using fallback extraction for:', entity);
-  
+
   // Common patterns to remove from messages
   const removePatterns = [
     /^(please\s+)?(add|delete|remove|clear)\s+/i,
@@ -560,26 +573,26 @@ const fallbackExtraction = (userMessage, classification) => {
     /^(can you\s+)?put\s+/i,
     /^i\s+(want|need)\s+(to\s+)?(add\s+)?/i,
   ];
-  
+
   let cleaned = userMessage;
   for (const pattern of removePatterns) {
     cleaned = cleaned.replace(pattern, '');
   }
   cleaned = cleaned.trim();
-  
+
   // Check for multiple items (separated by "and", ",", or "&")
   const multiItems = cleaned.split(/\s*(?:,|and|&)\s*/i).filter(item => item.trim().length > 0);
-  
+
   switch (entity) {
     case 'shopping':
       if (multiItems.length > 1) {
         return { items: multiItems.map(i => i.trim()) };
       }
       return { item_name: cleaned || userMessage };
-      
+
     case 'wishlist':
       return { item_name: cleaned || userMessage };
-      
+
     case 'reminder':
       // Try to extract time
       const timeMatch = message.match(/(\d{1,2})\s*(am|pm)|(\d{1,2}):(\d{2})/i);
@@ -596,19 +609,19 @@ const fallbackExtraction = (userMessage, classification) => {
       }
       const reminderName = cleaned.replace(/\s*(at\s+)?\d{1,2}(:\d{2})?\s*(am|pm)?/gi, '').trim();
       return { reminder_name: reminderName || cleaned, reminder_time: time };
-      
+
     case 'workout':
       return { workout_name: cleaned || 'Workout' };
-      
+
     case 'diet':
       return { food_name: cleaned || 'Food' };
-      
+
     case 'recipe':
       // Extract week, day, meal_type, and food_name from message
       const weekMatch = message.match(/week\s*(\d+)/i);
       const dayMatch = message.match(/day\s*(\d+)/i);
       const mealMatch = message.match(/(?:for|to)\s+(breakfast|lunch|dinner|snack)/i);
-      
+
       // Clean the food name by removing week/day/meal references
       let foodName = cleaned
         .replace(/week\s*\d+/gi, '')
@@ -617,18 +630,18 @@ const fallbackExtraction = (userMessage, classification) => {
         .replace(/on\s+/gi, '')
         .replace(/to\s+recipes?/gi, '')
         .trim();
-      
+
       return {
         food_name: foodName || 'Recipe',
         week: weekMatch ? parseInt(weekMatch[1]) : 1,
         day: dayMatch ? `Day ${dayMatch[1]}` : 'Day 1',
         meal_type: mealMatch ? mealMatch[1].charAt(0).toUpperCase() + mealMatch[1].slice(1).toLowerCase() : 'Snack'
       };
-      
+
     case 'measurement':
       // Extract body part name and value
-      const measurementParts = ['weight', 'height', 'neck', 'chest', 'waist', 'stomach', 'shoulder', 
-        'left bicep', 'right bicep', 'left forearm', 'right forearm', 
+      const measurementParts = ['weight', 'height', 'neck', 'chest', 'waist', 'stomach', 'shoulder',
+        'left bicep', 'right bicep', 'left forearm', 'right forearm',
         'left leg', 'right leg', 'left calf', 'right calf',
         // Strength max values
         'bench', 'bench press', 'overhead press', 'ohp', 'rows', 'row', 'squats', 'squat', 'deadlift'];
@@ -640,11 +653,11 @@ const fallbackExtraction = (userMessage, classification) => {
           break;
         }
       }
-      return { 
-        name: measureName || null, 
-        value: valueMatch ? parseFloat(valueMatch[1]) : null 
+      return {
+        name: measureName || null,
+        value: valueMatch ? parseFloat(valueMatch[1]) : null
       };
-      
+
     default:
       return { name: cleaned };
   }
@@ -655,7 +668,7 @@ const fallbackExtraction = (userMessage, classification) => {
  */
 export const handleChat = async (req, res) => {
   const startTime = Date.now();
-  
+
   try {
     const { message, conversationHistory = [] } = req.body;
 
@@ -673,7 +686,7 @@ export const handleChat = async (req, res) => {
       const processingTime = Date.now() - startTime;
       console.log(`⏱️ [AI] Total processing time: ${processingTime}ms`);
       console.log('🤖 ═══════════════════════════════════════════════\n');
-      
+
       return res.json({
         response: adamResponse,
         classification: {
@@ -693,7 +706,7 @@ export const handleChat = async (req, res) => {
       const processingTime = Date.now() - startTime;
       console.log(`⏱️ [AI] Total processing time: ${processingTime}ms`);
       console.log('🤖 ═══════════════════════════════════════════════\n');
-      
+
       return res.json({
         response: creatorResponse,
         classification: {
@@ -713,7 +726,7 @@ export const handleChat = async (req, res) => {
       const processingTime = Date.now() - startTime;
       console.log(`⏱️ [AI] Total processing time: ${processingTime}ms`);
       console.log('🤖 ═══════════════════════════════════════════════\n');
-      
+
       return res.json({
         response: identityResponse,
         classification: {
@@ -739,7 +752,7 @@ export const handleChat = async (req, res) => {
     if ([INTENTS.ADD, INTENTS.UPDATE, INTENTS.DELETE].includes(classification.intent)) {
       // Get values from classification fallback first
       let actionDetails = classification.details?.extracted_values || {};
-      
+
       // Only use LLM extraction if fallback didn't provide good values
       // For reminders, check if we have reminder_name. For others, check relevant fields.
       const hasFallbackValues = classification.fallback && (
@@ -751,16 +764,16 @@ export const handleChat = async (req, res) => {
         (classification.entity === 'measurement' && actionDetails.name) ||
         (classification.entity === 'recipe' && actionDetails.food_name)
       );
-      
+
       if (!hasFallbackValues) {
         // Fallback didn't provide enough, try LLM extraction
         const llmDetails = await extractActionDetails(message, classification);
         // Merge LLM details with fallback, preferring fallback for dates
         actionDetails = { ...llmDetails, ...actionDetails };
       }
-      
+
       console.log('📝 [AI] Extracted values:', actionDetails);
-      
+
       actionResult = await executeAction(classification, actionDetails);
       console.log('⚡ [AI] Action result:', actionResult.success ? '✅ Success' : '❌ Failed');
     }
@@ -801,16 +814,16 @@ export const checkHealth = async (req, res) => {
   try {
     // Check if Ollama is running
     const response = await ollama.list();
-    
+
     const hasMistral = response.models?.some(m => m.name.includes('mistral'));
-    
+
     res.json({
       status: 'ok',
       ollama: 'connected',
       models: response.models?.map(m => m.name) || [],
       mistralAvailable: hasMistral,
-      message: hasMistral 
-        ? '✅ ISHA AI is ready!' 
+      message: hasMistral
+        ? '✅ ISHA AI is ready!'
         : '⚠️ Mistral model not found. Run: ollama pull mistral'
     });
 
@@ -829,7 +842,7 @@ export const checkHealth = async (req, res) => {
  */
 export const transcribeAudio = async (req, res) => {
   let wavPath = null;
-  
+
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No audio file provided' });
@@ -843,20 +856,20 @@ export const transcribeAudio = async (req, res) => {
     try {
       // Get the Whisper pipeline
       const transcriber = await getWhisperPipeline();
-      
+
       console.log('🔄 [Transcribe] Converting audio to WAV format...');
-      
+
       // Convert to proper WAV format using FFmpeg
       wavPath = await convertToWav(absolutePath);
-      
+
       console.log('🔄 [Transcribe] Decoding WAV file...');
-      
+
       // Decode WAV file to Float32Array
       const audioData = await readWavFile(wavPath);
-      
+
       console.log('🔄 [Transcribe] Processing audio with Whisper...');
       console.log('📊 [Transcribe] Audio samples:', audioData.length);
-      
+
       // Transcribe the audio
       const result = await transcriber(audioData, {
         chunk_length_s: 30,
@@ -865,7 +878,7 @@ export const transcribeAudio = async (req, res) => {
       });
 
       const transcribedText = result.text?.trim() || '';
-      
+
       console.log('✅ [Transcribe] Result:', transcribedText);
 
       // Clean up uploaded files
@@ -881,25 +894,25 @@ export const transcribeAudio = async (req, res) => {
       if (transcribedText) {
         res.json({ text: transcribedText });
       } else {
-        res.json({ 
-          text: '', 
-          message: 'Could not detect speech. Please try speaking clearly.' 
+        res.json({
+          text: '',
+          message: 'Could not detect speech. Please try speaking clearly.'
         });
       }
 
     } catch (whisperError) {
       console.error('❌ [Transcribe] Whisper error:', whisperError);
-      
+
       // Clean up files on error
-      fs.unlink(audioPath, () => {});
+      fs.unlink(audioPath, () => { });
       if (wavPath) {
-        fs.unlink(wavPath, () => {});
+        fs.unlink(wavPath, () => { });
       }
-      
-      res.status(500).json({ 
-        error: 'Transcription failed', 
+
+      res.status(500).json({
+        error: 'Transcription failed',
         message: 'Could not process audio. The model may still be loading.',
-        details: whisperError.message 
+        details: whisperError.message
       });
     }
 
