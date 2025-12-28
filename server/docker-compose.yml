@@ -1,4 +1,3 @@
-version: '3.8'
 
 services:
   isha-server:
@@ -10,7 +9,10 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=5001
-      - DATABASE_URL=postgresql://isha:isha_password@postgres:5432/isha_health
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-isha}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-isha_health}
+      - OLLAMA_HOST=http://ollama:11434
+    volumes:
+      - uploads_data:/app/uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -22,21 +24,33 @@ services:
     container_name: isha-postgres
     restart: unless-stopped
     environment:
-      - POSTGRES_USER=isha
-      - POSTGRES_PASSWORD=isha_password
-      - POSTGRES_DB=isha_health
+      - POSTGRES_USER=${POSTGRES_USER:-isha}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
+      - POSTGRES_DB=${POSTGRES_DB:-isha_health}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U isha -d isha_health"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-isha} -d ${POSTGRES_DB:-isha_health}"]
       interval: 10s
       timeout: 5s
       retries: 5
     networks:
       - isha-network
 
+  # Optional: Ollama for AI features (remove if not using AI)
+  ollama:
+    image: ollama/ollama:latest
+    container_name: isha-ollama
+    restart: unless-stopped
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - isha-network
+
 volumes:
   postgres_data:
+  uploads_data:
+  ollama_data:
 
 networks:
   isha-network:
