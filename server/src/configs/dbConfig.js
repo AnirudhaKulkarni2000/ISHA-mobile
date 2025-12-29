@@ -112,6 +112,37 @@ const runMigrations = async () => {
       );
     `);
 
+
+    // Create body_measurements table
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS body_measurements (
+        id SERIAL PRIMARY KEY,
+        height DECIMAL(5,2),
+        weight DECIMAL(5,2),
+        left_bicep DECIMAL(5,2),
+        right_bicep DECIMAL(5,2),
+        left_forearm DECIMAL(5,2),
+        right_forearm DECIMAL(5,2),
+        left_leg DECIMAL(5,2),
+        right_leg DECIMAL(5,2),
+        waist DECIMAL(5,2),
+        neck DECIMAL(5,2),
+        stomach DECIMAL(5,2),
+        chest NUMERIC(5,2),
+        left_calf NUMERIC(5,2),
+        right_calf NUMERIC(5,2),
+        shoulder_width NUMERIC(5,2),
+        bench_max NUMERIC(5,2),
+        overhead_press_max NUMERIC(5,2),
+        rows_max NUMERIC(5,2),
+        squats_max NUMERIC(5,2),
+        deadlift_max NUMERIC(5,2),
+        recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
     // 2. Create tables with dependencies
 
     // Create diet_logs table (Depends on food_recipes)
@@ -152,6 +183,15 @@ const runMigrations = async () => {
     // Add servings column if it doesn't exist
     await pool.query(`
       ALTER TABLE food_recipes ADD COLUMN IF NOT EXISTS servings DECIMAL(10, 2) DEFAULT 1;
+    `);
+
+    // Add workout max columns to body_measurements if they don't exist
+    await pool.query(`
+      ALTER TABLE body_measurements ADD COLUMN IF NOT EXISTS bench_max NUMERIC(5,2);
+      ALTER TABLE body_measurements ADD COLUMN IF NOT EXISTS overhead_press_max NUMERIC(5,2);
+      ALTER TABLE body_measurements ADD COLUMN IF NOT EXISTS rows_max NUMERIC(5,2);
+      ALTER TABLE body_measurements ADD COLUMN IF NOT EXISTS squats_max NUMERIC(5,2);
+      ALTER TABLE body_measurements ADD COLUMN IF NOT EXISTS deadlift_max NUMERIC(5,2);
     `);
 
     console.log('✅ Database tables created/verified');
