@@ -160,10 +160,6 @@ const runMigrations = async () => {
   }
 };
 
-console.log('✅ Database tables created/verified');
-  } catch (error) {
-  console.error('⚠️ Migration warning:', error.message);
-}
-};
+
 
 export default pool;
