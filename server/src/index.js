@@ -20,6 +20,10 @@ import shoppingListRoutes from "./routes/shoppingListRoutes.js";
 import wishlistRoutes from "./routes/wishlistRoutes.js";
 import progressRoutes from "./routes/progressRoutes.js";
 import aiRoutes from "./routes/aiRoutes.js";
+import notesRoutes from "./routes/notesRoutes.js";
+import booksRoutes from "./routes/booksRoutes.js";
+import animeRoutes from "./routes/animeRoutes.js";
+import expensesRoutes from "./routes/expensesRoutes.js";
 
 dotenv.config();
 
@@ -85,6 +89,10 @@ app.use("/api/measurements", bodyMeasurementsRoutes);
 app.use("/api/shopping-list", shoppingListRoutes);
 app.use("/api/wishlist", wishlistRoutes);
 app.use("/api/progress", progressRoutes);
+app.use("/api/notes", notesRoutes);
+app.use("/api/books", booksRoutes);
+app.use("/api/anime", animeRoutes);
+app.use("/api/expenses", expensesRoutes);
 app.use("/api", aiRoutes);  // AI chat routes
 
 // Serve uploaded files statically
