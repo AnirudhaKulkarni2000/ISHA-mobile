@@ -24,7 +24,7 @@ export const connectDB = async () => {
     const client = await pool.connect();
     console.log('✅ Connected to PostgreSQL database');
     client.release();
-    
+
     // Run migrations to add missing columns
     await runMigrations();
   } catch (error) {
@@ -36,7 +36,9 @@ export const connectDB = async () => {
 // Run database migrations to add missing columns
 const runMigrations = async () => {
   try {
-    // Create workouts table if it doesn't exist
+    // 1. Create independent tables first
+
+    // Create workouts table
     await pool.query(`
       CREATE TABLE IF NOT EXISTS workouts (
         id SERIAL PRIMARY KEY,
@@ -51,61 +53,7 @@ const runMigrations = async () => {
       );
     `);
 
-    // Create diet_logs table if it doesn't exist
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS diet_logs (
-        id SERIAL PRIMARY KEY,
-        food_name VARCHAR(255) NOT NULL,
-        meal_type VARCHAR(20) NOT NULL,
-        week INTEGER,
-        day VARCHAR(20),
-        calories INTEGER DEFAULT 0,
-        recipe_id INTEGER REFERENCES food_recipes(id) ON DELETE SET NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-
-    // Create reminders table if it doesn't exist
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS reminders (
-        id SERIAL PRIMARY KEY,
-        reminder_name VARCHAR(255) NOT NULL,
-        reminder_time TIME,
-        day VARCHAR(20),
-        date DATE,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-
-    // Create shopping_list table if it doesn't exist
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS shopping_list (
-        id SERIAL PRIMARY KEY,
-        grocery_name VARCHAR(255) NOT NULL,
-        amount VARCHAR(100),
-        price_rupees DECIMAL(10, 2) DEFAULT 0,
-        day VARCHAR(20),
-        date DATE,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-
-    // Create steps table if it doesn't exist
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS steps (
-        id SERIAL PRIMARY KEY,
-        day VARCHAR(20),
-        steps INTEGER DEFAULT 0,
-        date DATE,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-
-    // Create food_recipes table if it doesn't exist
+    // Create food_recipes table (Must be before diet_logs because of foreign key)
     await pool.query(`
       CREATE TABLE IF NOT EXISTS food_recipes (
         id SERIAL PRIMARY KEY,
@@ -125,6 +73,64 @@ const runMigrations = async () => {
       );
     `);
 
+    // Create steps table
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS steps (
+        id SERIAL PRIMARY KEY,
+        day VARCHAR(20),
+        steps INTEGER DEFAULT 0,
+        date DATE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // Create reminders table
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS reminders (
+        id SERIAL PRIMARY KEY,
+        reminder_name VARCHAR(255) NOT NULL,
+        reminder_time TIME,
+        day VARCHAR(20),
+        date DATE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // Create shopping_list table
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS shopping_list (
+        id SERIAL PRIMARY KEY,
+        grocery_name VARCHAR(255) NOT NULL,
+        amount VARCHAR(100),
+        price_rupees DECIMAL(10, 2) DEFAULT 0,
+        day VARCHAR(20),
+        date DATE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // 2. Create tables with dependencies
+
+    // Create diet_logs table (Depends on food_recipes)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS diet_logs (
+        id SERIAL PRIMARY KEY,
+        food_name VARCHAR(255) NOT NULL,
+        meal_type VARCHAR(20) NOT NULL,
+        week INTEGER,
+        day VARCHAR(20),
+        calories INTEGER DEFAULT 0,
+        recipe_id INTEGER REFERENCES food_recipes(id) ON DELETE SET NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // 3. Add columns to existing tables (if needed)
+
     // Add approx_calories column if it doesn't exist
     await pool.query(`
       ALTER TABLE food_recipes 
@@ -143,7 +149,7 @@ const runMigrations = async () => {
       ALTER TABLE food_recipes ADD COLUMN IF NOT EXISTS meal_type VARCHAR(20);
     `);
 
-    // Add servings column if it doesn't exist (replaces old amount column)
+    // Add servings column if it doesn't exist
     await pool.query(`
       ALTER TABLE food_recipes ADD COLUMN IF NOT EXISTS servings DECIMAL(10, 2) DEFAULT 1;
     `);
@@ -152,6 +158,12 @@ const runMigrations = async () => {
   } catch (error) {
     console.error('⚠️ Migration warning:', error.message);
   }
+};
+
+console.log('✅ Database tables created/verified');
+  } catch (error) {
+  console.error('⚠️ Migration warning:', error.message);
+}
 };
 
 export default pool;
