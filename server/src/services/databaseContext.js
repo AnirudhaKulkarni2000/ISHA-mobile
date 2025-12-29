@@ -1,4 +1,6 @@
 import pool from '../configs/dbConfig.js';
+import * as booksModel from '../models/booksModel.js';
+import * as animeModel from '../models/animeModel.js';
 
 /**
  * Build database context based on classified intent and entity
@@ -232,7 +234,7 @@ const getMeasurementContext = async (limit = 10) => {
       measurements: result.rows,
       latest: latest || null,
       bmi: bmi,
-      message: latest 
+      message: latest
         ? `Latest: Weight ${latest.weight}kg, Height ${latest.height}cm, BMI: ${bmi || 'N/A'}`
         : 'No measurements recorded yet'
     };
@@ -283,6 +285,48 @@ const getWishlistContext = async () => {
 };
 
 /**
+ * Fetch books context
+ */
+const getBooksContext = async () => {
+  try {
+    const books = await booksModel.getAllBooks();
+    const current = books.filter(b => b.status === 'reading');
+    const completed = books.filter(b => b.status === 'completed');
+
+    return {
+      books,
+      current,
+      completed,
+      message: `Found ${books.length} books. Reading: ${current.map(b => `${b.book_name} (Page ${b.current_page}/${b.total_pages})`).join(', ') || 'None'}. Completed: ${completed.length}.`
+    };
+  } catch (error) {
+    console.error('❌ [Context] Books fetch error:', error.message);
+    return { books: [], error: error.message };
+  }
+};
+
+/**
+ * Fetch anime context
+ */
+const getAnimeContext = async () => {
+  try {
+    const anime = await animeModel.getAllAnime();
+    const watching = anime.filter(a => !a.is_completed);
+    const completed = anime.filter(a => a.is_completed);
+
+    return {
+      anime,
+      watching,
+      completed,
+      message: `Found ${anime.length} anime. Watching: ${watching.map(a => `${a.anime_name} (Ep ${a.episodes_watched}/${a.total_episodes})`).join(', ') || 'None'}. Using Completed: ${completed.length}.`
+    };
+  } catch (error) {
+    console.error('❌ [Context] Anime fetch error:', error.message);
+    return { anime: [], error: error.message };
+  }
+};
+
+/**
  * Get general analytics/overview - COMPREHENSIVE
  */
 const getGeneralContext = async () => {
@@ -320,7 +364,9 @@ const getGeneralContext = async () => {
       measurements: measurementsData.rows,
       recentMeals: dietData.rows,
       latestMeasurement: latestMeasurement,
-      message: `Overview: ${stepsTotal.rows[0]?.total || 0} total steps, ${workoutsTotal.rows[0]?.total || 0} workouts, Current weight: ${latestMeasurement?.weight || 'N/A'}kg`
+      booksSummary: await getBooksContext(),
+      animeSummary: await getAnimeContext(),
+      message: `Overview: ${stepsTotal.rows[0]?.total || 0} total steps, ${workoutsTotal.rows[0]?.total || 0} workouts. Current Weight: ${latestMeasurement?.weight || 'N/A'}kg`
     };
   } catch (error) {
     console.error('❌ [Context] General fetch error:', error.message);
@@ -337,7 +383,7 @@ const getTodaysWorkouts = async () => {
   try {
     const todayDayName = getCurrentDayName();
     console.log('📅 [Context] Fetching workouts for:', todayDayName);
-    
+
     const result = await pool.query(
       `SELECT * FROM workouts WHERE LOWER(day) = LOWER($1) ORDER BY id`,
       [todayDayName]
@@ -348,7 +394,7 @@ const getTodaysWorkouts = async () => {
       dayName: todayDayName,
       count: result.rows.length,
       isToday: true,
-      message: result.rows.length > 0 
+      message: result.rows.length > 0
         ? `Found ${result.rows.length} workouts for ${todayDayName}`
         : `No workouts scheduled for ${todayDayName}`
     };
@@ -365,7 +411,7 @@ const getTodaysMeals = async () => {
   try {
     const todayDayName = getCurrentDayName();
     console.log('📅 [Context] Fetching meals for:', todayDayName);
-    
+
     // Get food recipes for today's day
     const result = await pool.query(
       `SELECT * FROM food_recipes WHERE LOWER(day) = LOWER($1) ORDER BY 
@@ -386,7 +432,7 @@ const getTodaysMeals = async () => {
       Snack: null,
       Dinner: null
     };
-    
+
     result.rows.forEach(meal => {
       if (meal.meal_type && mealsByType.hasOwnProperty(meal.meal_type)) {
         mealsByType[meal.meal_type] = meal;
@@ -437,12 +483,12 @@ const getTodaysAnalytics = async () => {
        WHERE dl.created_at::date = $1::date`,
       [todayDate]
     );
-    
+
     // Calculate calories consumed from diet logs
     const caloriesConsumed = dietLogsResult.rows.reduce((sum, meal) => {
       return sum + (parseFloat(meal.approx_calories) || parseFloat(meal.calories) || 0);
     }, 0);
-    
+
     // Calculate macros from diet logs
     const macros = {
       protein: dietLogsResult.rows.reduce((sum, meal) => sum + (parseFloat(meal.protein) || 0), 0),
@@ -455,9 +501,9 @@ const getTodaysAnalytics = async () => {
       `SELECT * FROM workouts WHERE date = $1`,
       [todayDate]
     );
-    
+
     console.log('🏋️ [Context] Today\'s workouts found:', workoutsResult.rows.length, 'for date:', todayDate);
-    
+
     // Estimate calories burnt from workouts (rough calculation: each exercise ~50-100 cal based on sets/reps)
     const workoutCaloriesBurnt = workoutsResult.rows.reduce((sum, workout) => {
       const sets = parseInt(workout.sets) || 1;
@@ -497,14 +543,14 @@ const getTodaysAnalytics = async () => {
     };
   } catch (error) {
     console.error('❌ [Context] Today\'s analytics fetch error:', error.message);
-    return { 
-      dayName: getCurrentDayName(), 
-      steps: 0, 
+    return {
+      dayName: getCurrentDayName(),
+      steps: 0,
       caloriesConsumed: 0,
-      caloriesPlanned: 0, 
-      caloriesBurnt: 0, 
+      caloriesPlanned: 0,
+      caloriesBurnt: 0,
       macros: { protein: 0, carbs: 0, fats: 0 },
-      error: error.message 
+      error: error.message
     };
   }
 };
@@ -516,7 +562,7 @@ const getTodaysReminders = async () => {
   try {
     const todayDate = getTodayDate();
     console.log('📅 [Context] Fetching reminders for:', todayDate);
-    
+
     const result = await pool.query(
       `SELECT * FROM reminders WHERE date = $1 ORDER BY reminder_time ASC`,
       [todayDate]
@@ -549,14 +595,14 @@ export const buildContext = async (classification) => {
   const timeRef = details?.time_reference;
   const originalQuery = details?.original_query || '';
   const lowerQuery = originalQuery.toLowerCase();
-  
+
   console.log('📦 [Context] Building for:', entity, '| Time:', timeRef, '| Query:', originalQuery);
 
   // Check if this is a "today's" specific query
-  const isTodayQuery = lowerQuery.includes("today's") || 
-                       lowerQuery.includes('todays') || 
-                       lowerQuery.includes('today') ||
-                       timeRef === 'today';
+  const isTodayQuery = lowerQuery.includes("today's") ||
+    lowerQuery.includes('todays') ||
+    lowerQuery.includes('today') ||
+    timeRef === 'today';
 
   let context = {};
 
@@ -597,6 +643,12 @@ export const buildContext = async (classification) => {
       break;
     case 'reminder':
       context = await getReminderContext();
+      break;
+    case 'book':
+      context = await getBooksContext();
+      break;
+    case 'anime':
+      context = await getAnimeContext();
       break;
     case 'steps':
       context = await getStepsContext(timeRef);
@@ -649,5 +701,8 @@ export default {
   getTodaysWorkouts,
   getTodaysMeals,
   getTodaysAnalytics,
+
   getTodaysReminders,
+  getBooksContext,
+  getAnimeContext,
 };

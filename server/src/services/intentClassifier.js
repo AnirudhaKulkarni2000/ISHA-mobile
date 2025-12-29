@@ -29,6 +29,8 @@ export const ENTITIES = {
   WISHLIST: 'wishlist',
   ANALYTICS: 'analytics',   // For today's analytics (calories, macros, etc.)
   GENERAL: 'general',       // For general stats, overviews
+  BOOK: 'book',
+  ANIME: 'anime',
 };
 
 // System prompt for intent classification
@@ -55,6 +57,8 @@ ENTITIES:
 - shopping: Shopping list, groceries to buy, "add to shopping list", "buy"
 - wishlist: Items user wants to buy/get, "add to wishlist", "I want to buy"
 - general: Analytics, progress, summaries, or unclear
+- book: Reading list, books, "reading", "pages", "chapter"
+- anime: Anime watchlist, "watching", "episodes", "season"
 
 IMPORTANT: Extract all relevant values from the message!
 - For workouts: workout_name (REQUIRED), sets, reps, weights, day, date
@@ -64,7 +68,9 @@ IMPORTANT: Extract all relevant values from the message!
 - For diet: food_name (REQUIRED), meal_type, calories
 - For steps: steps (REQUIRED - number), date
 - For recipes: food_name (REQUIRED), week (1-5), day ("Day 1" to "Day 7"), meal_type (Breakfast/Lunch/Snack/Dinner), ingredients, calories
-- For measurements: name (REQUIRED - e.g. 'weight', 'height', 'chest', 'neck', 'left_bicep', 'right_bicep', 'waist', 'shoulder', 'left_leg', 'right_leg', 'left_forearm', 'right_forearm', 'left_calf', 'right_calf', 'stomach'), value (REQUIRED for add/update - number)
+- For measurements: name (REQUIRED - e.g. 'weight', 'height'), value (REQUIRED for add/update - number)
+- For books: book_name, author, current_page, total_pages
+- For anime: anime_name, episode, total_episodes
 
 RECIPE RULES:
 - "add corn peas masala on week 1 day 2 for dinner" → intent: add, entity: recipe, food_name: "corn peas masala", week: 1, day: "Day 2", meal_type: "Dinner"
@@ -340,7 +346,7 @@ const extractValuesWithRegex = (message, entity) => {
       if (/lunch/i.test(lowerMessage)) mealTypes.push('Lunch');
       if (/dinner/i.test(lowerMessage)) mealTypes.push('Dinner');
       if (/snack/i.test(lowerMessage)) mealTypes.push('Snack');
-      
+
       if (mealTypes.length > 1) {
         values.meal_types = mealTypes;
         values.action = 'mark_eaten';
@@ -380,7 +386,7 @@ export const classifyIntent = async (message) => {
       const semanticMatch = await findBestMatch(message, 0.65);
       if (semanticMatch && semanticMatch.confidence >= 0.65) {
         console.log(`✅ [Intent] Semantic match: ${semanticMatch.intent} → ${semanticMatch.entity} (${(semanticMatch.confidence * 100).toFixed(1)}%)`);
-        
+
         // Still need to extract values using LLM for ADD/UPDATE/DELETE intents
         if (['add', 'update', 'delete'].includes(semanticMatch.intent)) {
           try {
@@ -412,7 +418,7 @@ export const classifyIntent = async (message) => {
             };
           }
         }
-        
+
         // For QUERY and CHAT, no value extraction needed
         return {
           intent: semanticMatch.intent,
@@ -447,11 +453,11 @@ export const classifyIntent = async (message) => {
 
     // Parse JSON response
     const classification = JSON.parse(content);
-    
+
     // Validate the classification - if structure is wrong, use fallback
     const hasValidIntent = classification.intent && INTENTS[classification.intent.toUpperCase()];
     const hasValidEntity = classification.entity && Object.values(ENTITIES).includes(classification.entity);
-    
+
     // If the LLM returned garbage JSON without proper intent/entity, use fallback
     if (!hasValidIntent || !hasValidEntity) {
       console.log('⚠️ [Intent] Invalid LLM response structure, using regex fallback');
@@ -464,7 +470,7 @@ export const classifyIntent = async (message) => {
 
   } catch (error) {
     console.error('❌ [Intent] Classification error:', error.message);
-    
+
     // Fallback to simple regex-based classification
     return fallbackClassification(message);
   }
@@ -477,10 +483,10 @@ export const classifyIntent = async (message) => {
  */
 const fallbackClassification = (message) => {
   const lowerMessage = message.toLowerCase();
-  
+
   // Entity patterns - check FIRST to help determine intent
   let entity = ENTITIES.GENERAL;
-  
+
   // Check for "calories burnt" FIRST - this should go to analytics, not diet
   if (/calorie.*(burn|burnt)|burn.*calorie|(how\s+many|what).*(burn|burnt)/i.test(lowerMessage)) {
     entity = ENTITIES.ANALYTICS;
@@ -512,11 +518,15 @@ const fallbackClassification = (message) => {
     entity = ENTITIES.SHOPPING;
   } else if (/wish|wishlist/i.test(lowerMessage)) {
     entity = ENTITIES.WISHLIST;
+  } else if (/book|read|reading|page|chapter|author/i.test(lowerMessage)) {
+    entity = ENTITIES.BOOK;
+  } else if (/anime|manga|watch|episode|season/i.test(lowerMessage)) {
+    entity = ENTITIES.ANIME;
   }
 
   // Intent patterns
   let intent = INTENTS.CHAT;
-  
+
   // Check for "today's" queries - these are almost always QUERY intent
   if (/today'?s?\s+(workout|meal|food|diet|analytic|reminder|calorie|macro)/i.test(lowerMessage)) {
     intent = INTENTS.QUERY;
@@ -546,7 +556,7 @@ const fallbackClassification = (message) => {
 
   // Extract values for reminders
   const extractedValues = {};
-  
+
   if (entity === ENTITIES.REMINDER) {
     // Extract reminder name - text after "remind me to", "reminder to", "set a reminder to", etc.
     const reminderMatch = lowerMessage.match(/(?:remind(?:er)?(?:\s+me)?(?:\s+to)?|set\s+(?:a\s+)?reminder(?:\s+to)?)\s+(.+?)(?:\s+(?:at|on|tomorrow|today|\d))/i);
@@ -564,7 +574,7 @@ const fallbackClassification = (message) => {
         extractedValues.reminder_name = name.trim();
       }
     }
-    
+
     // Extract time - patterns like "3pm", "11am", "6:30 pm", "at 8 AM"
     const timeMatch = lowerMessage.match(/(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)/i);
     if (timeMatch) {
@@ -575,7 +585,7 @@ const fallbackClassification = (message) => {
       if (ampm === 'am' && hours === 12) hours = 0;
       extractedValues.reminder_time = `${hours.toString().padStart(2, '0')}:${minutes}`;
     }
-    
+
     // Extract date - patterns like "27th December", "December 27"
     const months = {
       'january': 0, 'jan': 0, 'february': 1, 'feb': 1, 'march': 2, 'mar': 2,
@@ -583,7 +593,7 @@ const fallbackClassification = (message) => {
       'august': 7, 'aug': 7, 'september': 8, 'sep': 8, 'sept': 8, 'october': 9, 'oct': 9,
       'november': 10, 'nov': 10, 'december': 11, 'dec': 11
     };
-    
+
     // Helper to format date as YYYY-MM-DD in local timezone
     const formatDateLocal = (date) => {
       const y = date.getFullYear();
@@ -591,12 +601,12 @@ const fallbackClassification = (message) => {
       const d = String(date.getDate()).padStart(2, '0');
       return `${y}-${m}-${d}`;
     };
-    
+
     // Pattern: "27th December" or "27 December"
     const dateMatch1 = lowerMessage.match(/(\d{1,2})(?:st|nd|rd|th)?\s+(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)/i);
     // Pattern: "December 27" or "December 27th"
     const dateMatch2 = lowerMessage.match(/(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\s+(\d{1,2})(?:st|nd|rd|th)?/i);
-    
+
     if (dateMatch1) {
       const day = parseInt(dateMatch1[1]);
       const monthStr = dateMatch1[2].toLowerCase();
@@ -637,8 +647,8 @@ const fallbackClassification = (message) => {
       extractedValues.steps = parseInt(numbers[0]);
     } else if (entity === ENTITIES.MEASUREMENT) {
       // Extract measurement name and value
-      const measurementParts = ['weight', 'height', 'neck', 'chest', 'waist', 'stomach', 'shoulder', 
-        'left bicep', 'right bicep', 'left forearm', 'right forearm', 
+      const measurementParts = ['weight', 'height', 'neck', 'chest', 'waist', 'stomach', 'shoulder',
+        'left bicep', 'right bicep', 'left forearm', 'right forearm',
         'left leg', 'right leg', 'left calf', 'right calf', 'leftbicep', 'rightbicep'];
       for (const part of measurementParts) {
         if (lowerMessage.includes(part)) {

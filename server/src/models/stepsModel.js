@@ -54,28 +54,29 @@ export const getWeeklySteps = async () => {
 };
 
 // Add steps to today (creates or updates)
-export const addStepsToday = async (stepsToAdd) => {
+export const addStepsToday = async (stepsTotal) => {
   const today = new Date();
   const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   const day = dayNames[today.getDay()];
   const date = today.toISOString().split('T')[0];
-  
+
   // Check if today's entry exists
   const existing = await getStepsByDate(date);
-  
+
   if (existing) {
-    // Update existing entry
+    // Update existing entry - REPLACE the value, don't add to it
+    // The client sends the total steps for the day
     const query = `
       UPDATE steps 
-      SET steps = steps + $1, updated_at = CURRENT_TIMESTAMP
+      SET steps = $1, updated_at = CURRENT_TIMESTAMP
       WHERE date = $2
       RETURNING *;
     `;
-    const result = await pool.query(query, [stepsToAdd, date]);
+    const result = await pool.query(query, [stepsTotal, date]);
     return result.rows[0];
   } else {
     // Create new entry
-    return createSteps({ day, steps: stepsToAdd, date });
+    return createSteps({ day, steps: stepsTotal, date });
   }
 };
 
@@ -121,10 +122,10 @@ export const updateGoal = async (goal) => {
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
   `);
-  
+
   const checkQuery = 'SELECT * FROM step_goal LIMIT 1;';
   const existing = await pool.query(checkQuery);
-  
+
   if (existing.rows.length > 0) {
     const query = `
       UPDATE step_goal 
