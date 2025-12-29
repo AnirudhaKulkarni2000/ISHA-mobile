@@ -159,3 +159,28 @@ export default {
   getGoal,
   updateGoal,
 };
+
+// Upsert steps for a specific date (history sync)
+export const upsertSteps = async (date, stepsTotal) => {
+  const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const dayDate = new Date(date);
+  const day = dayNames[dayDate.getDay()];
+
+  // Check if entry exists for this date
+  const existing = await getStepsByDate(date);
+
+  if (existing) {
+    // Update existing
+    const query = `
+      UPDATE steps 
+      SET steps = $1, updated_at = CURRENT_TIMESTAMP
+      WHERE date = $2
+      RETURNING *;
+    `;
+    const result = await pool.query(query, [stepsTotal, date]);
+    return result.rows[0];
+  } else {
+    // Create new
+    return createSteps({ day, steps: stepsTotal, date });
+  }
+};

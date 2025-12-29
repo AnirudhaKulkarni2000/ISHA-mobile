@@ -136,6 +136,33 @@ export const getGoal = async (req, res) => {
   }
 };
 
+
+// Sync historical steps (bulk upsert)
+export const syncHistory = async (req, res) => {
+  try {
+    const { history } = req.body; // Array of { date: 'YYYY-MM-DD', steps: 1234 }
+
+    if (!history || !Array.isArray(history)) {
+      return res.status(400).json({ success: false, message: 'History array is required' });
+    }
+
+    console.log(`Processing sync for ${history.length} days of history...`);
+
+    const results = [];
+    for (const entry of history) {
+      if (entry.date && entry.steps !== undefined) {
+        const result = await stepsModel.upsertSteps(entry.date, entry.steps);
+        results.push(result);
+      }
+    }
+
+    res.status(200).json({ success: true, count: results.length, message: 'History synced successfully' });
+  } catch (error) {
+    console.error('Error syncing history:', error);
+    res.status(500).json({ success: false, message: 'Failed to sync history', error: error.message });
+  }
+};
+
 export default {
   getAllSteps,
   getStepsById,
@@ -147,4 +174,5 @@ export default {
   deleteSteps,
   updateGoal,
   getGoal,
+  syncHistory,
 };

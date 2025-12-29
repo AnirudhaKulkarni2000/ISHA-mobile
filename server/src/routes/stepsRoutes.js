@@ -24,6 +24,9 @@ router.post('/', stepsController.createSteps);
 // POST add steps to today
 router.post('/add-today', stepsController.addStepsToday);
 
+// POST sync history (bulk)
+router.post('/sync-history', stepsController.syncHistory);
+
 // PUT update goal
 router.put('/goal', stepsController.updateGoal);
 
